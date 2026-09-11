@@ -1,0 +1,6 @@
+iso/build/
+iso/nocloud/pool/
+*.pyc
+__pycache__/
+# Ne JAMAIS pousser les secrets remplis : avant tout commit public,
+# git restore iso/nocloud/user-hash.sh iso/nocloud/luks-passphrase.sh

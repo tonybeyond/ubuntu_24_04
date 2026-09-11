@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# ubunturiri-theme-set — applique un thème Omarchy à la session GNOME/Xorg.
+#
+# Adaptation Ubuntu : rend les templates GTK/libadwaita/alacritty avec les
+# couleurs du thème (même moteur que fedoriri), rechargé à chaud sauf
+# --no-reload (premier boot, aucune session). S'exécute en UTILISATEUR.
+
+set -euo pipefail
+
+SHARE="${UBUNTURIRI_SHARE_DIR:-/usr/share/ubunturiri}"
+CONF="$HOME/.config"
+STATE="$CONF/ubunturiri"
+RENDER="/usr/local/bin/ubunturiri-render-theme"
+[ -x "$RENDER" ] || RENDER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/render-theme.py"
+
+log()  { printf '\033[1;34m[theme]\033[0m %s\n' "$*"; }
+die()  { printf '\033[1;31m[theme]\033[0m %s\n' "$*" >&2; exit 1; }
+
+RELOAD=1
+case "${1:-}" in
+  --no-reload) RELOAD=0; shift ;;
+esac
+THEME="${1:-}"
+[ -n "$THEME" ] || die "Usage : ubunturiri-theme-set [--no-reload] <thème>"
+
+# Le theme peut vivre au niveau utilisateur (surcharge) ou système.
+if [ -f "$STATE/themes/$THEME/colors.toml" ]; then
+  COLORS="$STATE/themes/$THEME/colors.toml"
+elif [ -f "$SHARE/themes/$THEME/colors.toml" ]; then
+  COLORS="$SHARE/themes/$THEME/colors.toml"
+else
+  die "thème inconnu : $THEME (attendu : colors.toml dans $SHARE/themes/$THEME)"
+fi
+
+mkdir -p "$STATE/themes/$THEME"
+TPL_DIRS=( "$STATE/templates" "$SHARE/templates" )
+for d in "${TPL_DIRS[@]}"; do
+  [ -d "$d" ] || continue
+  for tpl in "$d"/*.tpl; do
+    [ -f "$tpl" ] || continue
+    base="$(basename "$tpl" .tpl)"
+    out=""
+    case "$base" in
+      alacritty.toml)      out="$CONF/alacritty/alacritty.toml" ;;
+      gtk-3.0.css)         out="$CONF/gtk-3.0/gtk.css" ;;
+      gtk-4.0.css)         out="$CONF/gtk-4.0/gtk.css" ;;
+      starship.toml)       out="$CONF/starship.toml" ;;
+      *)                   out="$STATE/themes/$THEME/$base" ;;
+    esac
+    mkdir -p "$(dirname "$out")"
+    python3 "$RENDER" "$COLORS" "$tpl" "$out" || die "rendu échoué : $tpl"
+  done
+done
+printf '%s\n' "$THEME" > "$STATE/current-theme"
+log "thème '$THEME' appliqué → $CONF"
+
+if [ "$RELOAD" -eq 1 ]; then
+  # Rechargement à chaud : GTK relit gtk.css, alacritty relit son config.
+  gsettings set org.gnome.desktop.interface color-scheme prefer-dark 2>/dev/null || true
+fi

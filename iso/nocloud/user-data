@@ -1,0 +1,13 @@
+#cloud-config
+# user-data ubunturiri — point d'entrée de la seed NoCloud.
+#
+# Subiquity recopie ce fichier tel quel dans /var/log/installer/ du système
+# installé : il ne contient donc AUCUN secret et aucune donnée générée.
+# Toute la configuration réelle (identité, stockage LUKS2, paquets,
+# commandes) est produite À L'INSTALLATION par gen-autoinstall.sh, qui écrit
+# /autoinstall.yaml — subiquity, démarré en mode autoinstall, le relit
+# après les early-commands (mécanisme officiel).
+autoinstall:
+  version: 1
+  early-commands:
+    - /bin/bash /cdrom/nocloud/gen-autoinstall.sh

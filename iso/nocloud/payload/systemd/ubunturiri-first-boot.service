@@ -1,0 +1,22 @@
+# ubunturiri-first-boot.service — installation lourde au premier démarrage.
+#
+# Pourquoi ici et pas dans les late-commands : ni réseau garanti, ni
+# services démarrables, ni session graphique en chroot. Au premier boot,
+# tout cela est disponible. Le témoin empêche de rejouer.
+
+[Unit]
+Description=ubunturiri : post-installation au premier démarrage
+ConditionPathExists=!/var/lib/ubunturiri/first-boot.done
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ubunturiri/scripts/first-boot.sh
+# L'étape dure plusieurs minutes (télécharger des centaines de Mo) :
+# sans retour console, l'utilisateur croit à un démarrage figé.
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
