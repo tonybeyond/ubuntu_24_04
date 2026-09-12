@@ -101,7 +101,7 @@ fi
 # silencieux, aucun log émis auparavant).
 # ---------------------------------------------------------------------------
 ensure_prereqs() {
-  local pkgs=(curl gpg coreutils xorriso mtools isolinux dpkg-dev apt-utils rsync ca-certificates)
+  local pkgs=(curl gpg coreutils xorriso mtools isolinux dpkg-dev apt-utils rsync ca-certificates ubuntu-keyring)
   local cmds=(curl gpg sha256sum xorriso mcopy mtype dpkg-scanpackages rsync apt-get)
   local missing=() c
   for c in "${cmds[@]}"; do
@@ -205,21 +205,43 @@ build_package_pool() {
     return
   fi
   [ "$(id -u)" -eq 0 ] || die "cette étape exige root : relancez avec sudo ./iso/build-iso.sh"
-  apt-get update -qq
-  # Répertoires apt dédiés (jamais partagés avec l'hôte) : --download-only
-  # y dépose les .deb + l'arborescence lists/partial qu'apt exige — sinon
-  # « Unable to locate package » dès le premier paquet (constaté au run n°1).
-  local aptc="$BUILD_DIR/apt-cache"
+  # Cache apt DÉDIÉ (aucun partage avec l'hôte). Le piège du run n°2 : un
+  # cache custom vide n'hérite NI des listes NI des sources de l'hôte → apt ne
+  # voyait aucun paquet. On pointe donc update ET download sur ce cache, avec
+  # les sources Ubuntu EXPLICITES (noble main+universe : Pop Shell et
+  # alacritty sont dans universe, pas main).
+  local aptc="$BUILD_DIR/apt-cache" srclist="$BUILD_DIR/ubuntu-pool.list"
   mkdir -p "$aptc/archives/partial" "$aptc/lists/partial"
-  apt-get install -y --download-only --no-install-recommends \
-    -o Dir::Cache="$aptc" \
-    -o Dir::Cache::archives="$aptc/archives" \
-    -o Dir::State::lists="$aptc/lists" \
-    -o Debug::NoLocking=1 \
+  apt_opts=(
+    -o Dir::Cache="$aptc"
+    -o Dir::Cache::archives="$aptc/archives"
+    -o Dir::State::lists="$aptc/lists"
+    -o APT::Sandbox::User=root
+    -o Debug::NoLocking=1
+    -o Dir::Etc::sourcelist="$srclist"
+    -o Dir::Etc::sourceparts=-
+    -o APT::Get::List-Cleanup=0
+  )
+  # Le piège du run n°3 : rediriger Dir::Etc::sourcelist DÉSACTIVE le keyring
+  # par défaut → apt ne vérifie plus les InRelease (« Missing key 91BC93C »,
+  # repo « not signed »). On force donc le keyring officiel dans chaque ligne
+  # (signed-by) ET on s'assure qu'il est présent (ubuntu-keyring).
+  local keyring="/usr/share/keyrings/ubuntu-archive-keyring.gpg"
+  [ -f "$keyring" ] || apt-get install -y ubuntu-keyring || die "ubuntu-keyring absent (requis pour la vérif GPG du pool)"
+  cat > "$srclist" <<EOF
+deb [signed-by=$keyring] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
+deb [signed-by=$keyring] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
+deb [signed-by=$keyring] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
+EOF
+  log "apt update (sources Ubuntu explicites, cache dédié)…"
+  apt-get "${apt_opts[@]}" update -qq \
+    || die "apt update a échoué (accès à archive.ubuntu.com / security.ubuntu.com ?)"
+  # --download-only : ferme la résolution complète et dépose les .deb.
+  apt-get "${apt_opts[@]}" install -y --download-only --no-install-recommends \
     $pkgs \
-    || die "téléchargement du pool échoué (réseau ? nom de paquet invalide ?)"
+    || die "téléchargement du pool échoué — un paquet est-il absent de noble ?"
   mkdir -p "$pool"
-  find "$aptc/archives" -name '*.deb' -exec cp -f {} "$pool/" \;
+  find "$aptc/archives" -name '*.deb' -not -path '*partial*' -exec cp -f {} "$pool/" \;
   [ -n "$(find "$pool" -name '*.deb' | head -1)" ] \
     || die "aucun .deb récupéré depuis $aptc/archives — chemin de cache inattendu ?"
   # Index du dépôt local (Packages.gz) : late-chroot.sh l'utilise comme
