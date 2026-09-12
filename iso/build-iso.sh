@@ -171,7 +171,15 @@ fetch_and_verify_upstream() {
     gpg --homedir "$gnupg_tmp" --verify "$BUILD_DIR/SHA256SUMS.gpg" "$BUILD_DIR/SHA256SUMS" \
       || die "signature GPG de SHA256SUMS invalide — build interrompu"
     rm -rf "$gnupg_tmp"
-    ( cd "$BUILD_DIR" && grep "^\\*${ISO_FILE}$" SHA256SUMS | sha256sum -c - ) \
+    # Vérifie la ligne exacte du fichier ISO (format « hash *nom » du SUMS) :
+    # nom en ancre, un seul résultat attendu, puis sha256sum -c depuis le
+    # répertoire de l'ISO (le SUMS utilise des chemins relatifs « *nom »).
+    local sumline
+    sumline="$(grep -E "^[0-9a-f]{64} \*${ISO_FILE}\$" "$BUILD_DIR/SHA256SUMS")" \
+      || die "aucune ligne de checksum pour $ISO_FILE dans SHA256SUMS"
+    [ "$(wc -l <<<"$sumline" | tr -d ' ')" = "1" ] \
+      || die "plusieurs lignes de checksum pour $ISO_FILE — inattendu"
+    ( cd "$BUILD_DIR" && printf '%s\n' "$sumline" | sha256sum -c - ) \
       || die "sha256 de l'ISO invalide — build interrompu"
     log "ISO amont vérifiée (GPG + sha256) ✔"
   fi
