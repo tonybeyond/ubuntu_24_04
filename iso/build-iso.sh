@@ -22,17 +22,21 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck source=../iso/nocloud/payload/scripts/lib/common.sh
 source "$REPO_ROOT/iso/nocloud/payload/scripts/lib/common.sh"
 
-ISO_SERIES="24.04.2"
 ARCH=amd64
 BASE_URL="https://releases.ubuntu.com/noble"
-ISO_FILE="ubuntu-${ISO_SERIES}-desktop-${ARCH}.iso"
-ISO_URL="${BASE_URL}/${ISO_FILE}"
+# La point-release (24.04.x) bouge : releases.ubuntu.com retire l'ancienne
+# quand une nouvelle sort. On résout le nom d'ISO LE PLUS RÉCENT publié,
+# jamais une version codée en dur (404 constaté le 2026-09 : 24.04.2 retirée).
+ISO_FILE=""   # rempli par resolve_iso_name()
+ISO_URL=""
+ISO_SERIES="" # idem
 
 BUILD_DIR="$SCRIPT_DIR/build"
-OUT_ISO="$BUILD_DIR/ubunturiri-${ISO_SERIES}-${ARCH}.iso"
+OUT_ISO=""      # défaut posé dans resolve_iso_name (dépend de la série)
 USE_PODMAN=0
 SKIP_POOL=0
 DRY_RUN=0
+DRY_FLAG=()
 
 usage() {
   cat <<EOF
@@ -41,7 +45,7 @@ Usage : $0 [options]
   --skip-pool   ne pas (re)télécharger le pool de paquets (itérations rapides ;
                 l'installation exigera alors le réseau)
   --pool-only   ne construit que le pool (pour cache), pas l'ISO
-  --output F    chemin de l'ISO produite (défaut : $OUT_ISO)
+  --output F    chemin de l'ISO produite (défaut : build/ubunturiri-<serie>-amd64.iso)
   --dry-run     affiche les commandes sans les exécuter
   --help        cette aide
 EOF
@@ -59,6 +63,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+finalize_flags
 
 # ---------------------------------------------------------------------------
 # Garde-fous : refus de builder avec les placeholders des secrets.
@@ -86,7 +91,7 @@ if [ "$USE_PODMAN" -eq 1 ]; then
     -v "$REPO_ROOT:/src:Z" -w /src \
     docker.io/library/ubuntu:24.04 \
     bash -c "apt-get update -qq && apt-get install -y --no-install-recommends \
-               curl gpg ca-certificates xorriso mtools isolinux apt-utils \
+               curl gpg ca-certificates xorriso mtools isolinux apt-utils dpkg-dev rsync \
              && ./iso/build-iso.sh $( [ "$SKIP_POOL" -eq 1 ] && printf -- '--skip-pool' )"
 fi
 
@@ -125,10 +130,27 @@ check_placeholders
 mkdir -p "$BUILD_DIR"
 
 # ---------------------------------------------------------------------------
+# Résolution du nom d'ISO amont : point-release la plus récente publiée.
+# ---------------------------------------------------------------------------
+resolve_iso_name() {
+  log "résolution de l'ISO amont (point-release courante 24.04)…"
+  ISO_FILE="$(curl -fsSL "$BASE_URL/" \
+    | grep -oE "ubuntu-24\.04\.[0-9]+-desktop-${ARCH}\.iso" \
+    | sort -uV | tail -1)"
+  [ -n "$ISO_FILE" ] || die "aucune ISO desktop ${ARCH} trouvée sur $BASE_URL"
+  ISO_SERIES="$(grep -oE '24\.04\.[0-9]+' <<<"$ISO_FILE")"
+  ISO_URL="${BASE_URL}/${ISO_FILE}"
+  # OUT_ISO dépend de la série résolue, sauf si --output a été passé.
+  [ -z "$OUT_ISO" ] && OUT_ISO="$BUILD_DIR/ubunturiri-${ISO_SERIES}-${ARCH}.iso"
+  log "ISO amont : $ISO_FILE → $OUT_ISO"
+}
+
+# ---------------------------------------------------------------------------
 # 1+2. ISO amont : téléchargement, vérification GPG + sha256.
 # ---------------------------------------------------------------------------
 fetch_and_verify_upstream() {
-  UPSTREAM_ISO="$BUILD_DIR/$ISO_FILE"
+  resolve_iso_name
+  UPSTREAM_ISO="$(cd "$BUILD_DIR" && pwd)/$ISO_FILE"
   if [ ! -f "$UPSTREAM_ISO" ]; then
     log "téléchargement de l'ISO amont ($ISO_FILE, ~3 Go)…"
     run curl -fL --retry 3 -o "$UPSTREAM_ISO.part" "$ISO_URL"
@@ -176,15 +198,22 @@ build_package_pool() {
   fi
   [ "$(id -u)" -eq 0 ] || die "cette étape exige root : relancez avec sudo ./iso/build-iso.sh"
   apt-get update -qq
-  # --download-only : les .deb atterrissent dans /var/cache/apt/archives.
+  # Répertoires apt dédiés (jamais partagés avec l'hôte) : --download-only
+  # y dépose les .deb + l'arborescence lists/partial qu'apt exige — sinon
+  # « Unable to locate package » dès le premier paquet (constaté au run n°1).
+  local aptc="$BUILD_DIR/apt-cache"
+  mkdir -p "$aptc/archives/partial" "$aptc/lists/partial"
   apt-get install -y --download-only --no-install-recommends \
-    -o Dir::Cache::archives="$BUILD_DIR/apt-cache" \
+    -o Dir::Cache="$aptc" \
+    -o Dir::Cache::archives="$aptc/archives" \
+    -o Dir::State::lists="$aptc/lists" \
     -o Debug::NoLocking=1 \
-    $pkgs
+    $pkgs \
+    || die "téléchargement du pool échoué (réseau ? nom de paquet invalide ?)"
   mkdir -p "$pool"
-  find "$BUILD_DIR/apt-cache" -name '*.deb' -exec cp -f {} "$pool/" \;
+  find "$aptc/archives" -name '*.deb' -exec cp -f {} "$pool/" \;
   [ -n "$(find "$pool" -name '*.deb' | head -1)" ] \
-    || die "aucun .deb récupéré dans le pool — chemin de cache inattendu ?"
+    || die "aucun .deb récupéré depuis $aptc/archives — chemin de cache inattendu ?"
   # Index du dépôt local (Packages.gz) : late-chroot.sh l'utilise comme
   # source apt file:// à l'installation.
   ( cd "$pool" && dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9c > Packages.gz ) \
@@ -196,13 +225,17 @@ build_package_pool() {
 # 4+5. Extraction, injection seed + payload + pool, réécriture du boot.
 # ---------------------------------------------------------------------------
 assemble_iso() {
+  # L'extraction a besoin de l'ISO amont (déjà vérifiée) : la résolution doit
+  # avoir eu lieu — fetch_and_verify_upstream est appelé avant assemble_iso.
+  [ -n "$ISO_FILE" ] || die "ISO amont non résolue (resolve_iso_name pas appelé ?)"
+  UPSTREAM_ISO="$(cd "$BUILD_DIR" && pwd)/$ISO_FILE"
+  [ -f "$UPSTREAM_ISO" ] || die "ISO amont absente : $UPSTREAM_ISO"
   local extract="$BUILD_DIR/extract"
   run rm -rf "$extract"
   mkdir -p "$extract"
   log "extraction de l'ISO amont…"
   xorriso -osirrox on -indev "$UPSTREAM_ISO" -extract / "$extract" >/dev/null 2>&1 \
-    || osirrox -indev "$UPSTREAM_ISO" -extract / "$extract" 2>/dev/null \
-    || die "osirrox introuvable — xorriso >= 1.4 requis"
+    || die "extraction osirrox échouée — xorriso >= 1.4 requis"
 
   # Seed NoCloud + payload + pool à la racine de l'ISO.
   run rsync -a --delete \
@@ -242,20 +275,24 @@ ISOLINUX
   fi
 
   # --- Recombinaison hybride (BIOS + UEFI) ---------------------------------
+  # Les options El Torito amont sont RELUES du catalogue de l'ISO
+  # (-report_el_torito as_mkisofs) et rejouées telles quelles : jamais de
+  # chemin d'image de boot codé en dur (varie d'une point-release à l'autre).
+  # Le boot catalog (-c) est repositionné sur un chemin qui existera dans
+  # l'arborescence extraite.
   run rm -f "$OUT_ISO"
-  # Localise le boot UEFI depuis l'ISO AMONT (El Torito), sans rien supposer.
-  local report bootcat biosimg efi_img
+  local report
   report="$(xorriso -indev "$UPSTREAM_ISO" -report_el_torito as_mkisofs 2>/dev/null)" \
     || die "lecture du catalogue El Torito de l'ISO amont impossible"
   xorriso_opts=()
-  # Rejoue exactement les options de boot amont, en réécrivant les chemins
-  # relatifs vers l'extraction.
+  local line
   while IFS= read -r line; do
     case "$line" in
-      -c*) : ;; # boot catalog : on le repose nous-mêmes
+      -c|--boot-catalog*) : ;; # boot catalog : repositionné ci-dessous
       *) xorriso_opts+=("$line") ;;
     esac
   done <<< "$report"
+  mkdir -p "$extract/boot/grub"
   xorriso -as mkisofs \
     -iso-level 3 -full-iso9660-filenames \
     -volid "UBUNTURIRI" \
