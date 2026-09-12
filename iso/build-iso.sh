@@ -90,8 +90,37 @@ if [ "$USE_PODMAN" -eq 1 ]; then
              && ./iso/build-iso.sh $( [ "$SKIP_POOL" -eq 1 ] && printf -- '--skip-pool' )"
 fi
 
-require_cmd curl gpg sha256sum xorriso mksquashfs 2>/dev/null || require_cmd curl gpg sha256sum xorriso
-require_cmd mcopy mtype apt-get apt-get
+# ---------------------------------------------------------------------------
+# Prérequis : affiche ce qui manque et propose l'installation AVANT de mourir
+# (sinon le script semble « ne rien faire » : premier require_cmd = die
+# silencieux, aucun log émis auparavant).
+# ---------------------------------------------------------------------------
+ensure_prereqs() {
+  local pkgs=(curl gpg coreutils xorriso mtools isolinux dpkg-dev apt-utils rsync ca-certificates)
+  local cmds=(curl gpg sha256sum xorriso mcopy mtype dpkg-scanpackages rsync apt-get)
+  local missing=() c
+  for c in "${cmds[@]}"; do
+    command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "Outils manquants : ${missing[*]}" >&2
+    echo "Installez les prérequis :" >&2
+    echo "  sudo apt-get update && sudo apt-get install -y ${pkgs[*]}" >&2
+    if [ "$(id -u)" -eq 0 ] && [ -t 0 ]; then
+      read -r -p "Les installer maintenant ? [O/n] " rep
+      if [ "${rep:-O}" != "n" ] && [ "${rep:-O}" != "N" ]; then
+        apt-get update -qq && apt-get install -y "${pkgs[@]}" || die "installation des prérequis échouée"
+        # Re-vérification après installation.
+        for c in "${cmds[@]}"; do
+          command -v "$c" >/dev/null 2>&1 || die "toujours absent après installation : $c"
+        done
+        return
+      fi
+    fi
+    exit 1
+  fi
+}
+ensure_prereqs
 check_placeholders
 mkdir -p "$BUILD_DIR"
 
