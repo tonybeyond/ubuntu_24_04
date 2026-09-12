@@ -86,16 +86,16 @@ else
   log "→ moteur de thème absent, étape sautée"
 fi
 
-step "Pop Shell : activation de l'extension pour $TARGET_USER"
-# L'extension système est activée au premier login de l'utilisateur via
-# gnome-shell-extension-tool n'existant plus sur 24.04 : pose du dconf
-# via un autostart utilisateur (façon Omarchy, exécuté une fois).
+step "Extension de tuilage (tiling-assistant noble + tentative Pop Shell)"
+# Pop Shell n'est pas publié pour noble (GNOME 46) : ubuntu-tiling-assistant
+# fournit le tiling MAINTENU. On tente en PLUS le vrai Pop Shell depuis la
+# source communautaire la plus récente, best-effort (non bloquant).
 if [ -d /etc/skel/.config/autostart ]; then
-  cat > /etc/skel/.config/autostart/ubunturiri-pop-shell.desktop <<'EOF'
+  cat > /etc/skel/.config/autostart/ubunturiri-tiling.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
-Name=ubunturiri : activer Pop Shell
-Exec=gnome-extensions enable pop-shell@system76.com
+Name=ubunturiri : activer le tiling GNOME
+Exec=gnome-extensions enable ubuntu-tiling-assistant@ubuntu.com
 X-GNOME-Autostart-enabled=true
 X-GNOME-Autostart-Phase=Initialization
 EOF

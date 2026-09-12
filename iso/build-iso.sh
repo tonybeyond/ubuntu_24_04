@@ -196,7 +196,11 @@ build_package_pool() {
     return
   fi
   # Paquets explicites (mêmes noms que la section packages de gen-autoinstall).
-  local pkgs="ubuntu-desktop-minimal gnome-shell-extension-pop-shell \
+  # NOTE : Pop Shell n'a JAMAIS été publié dans noble (jammy seulement ;
+  # l'upstream 1.2.0 date de 2021, incompatible GNOME 46). On installe donc
+  # gnome-shell-extension-ubuntu-tiling-assistant (tiling, MAINTENU noble) ;
+  # install-pop-shell.sh tentera le vrai Pop Shell en overlay au 1er boot.
+  local pkgs="ubuntu-desktop-minimal gnome-shell-extension-ubuntu-tiling-assistant \
     gnome-shell-extension-manager gnome-tweaks alacritty network-manager \
     openssh-server curl ca-certificates"
   log "téléchargement du pool de paquets ($(echo $pkgs | wc -w | tr -d ' ') paquets explicites + dépendances)…"

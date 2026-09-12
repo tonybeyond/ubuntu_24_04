@@ -105,7 +105,7 @@ autoinstall:
 
   packages:
     - ubuntu-desktop-minimal
-    - gnome-shell-extension-pop-shell
+    - gnome-shell-extension-ubuntu-tiling-assistant
     - gnome-shell-extension-manager
     - gnome-tweaks
     - alacritty

@@ -1,7 +1,7 @@
 # ubunturiri
 
 ISO **Ubuntu 24.04 LTS** installable et entièrement automatisée : bureau
-**GNOME + Pop Shell** sur session **Xorg**, workflow et esthétique calqués
+**GNOME + tiling GNOME** sur session **Xorg**, workflow et esthétique calqués
 sur **Omarchy** (thèmes repris tels quels), avec **Citrix Workspace app**
 comme prérequis dur. Portage Ubuntu de [fedoriri](https://github.com/tonybeyond/fedoriri)
 — même architecture (secrets au build → autoinstall → premier boot), **sans
@@ -19,13 +19,13 @@ ISO desktop Ubuntu vérifiée (GPG+sha256)
                   └─ thème Omarchy par défaut (tokyo-night)
 ```
 
-## Pourquoi Xorg et pas Wayland, Pop Shell et pas Cosmic
+## Pourquoi Xorg et pas Wayland, tiling GNOME et pas Cosmic
 
 Citrix Workspace app pour Linux exige **X11** (« Wayland isn't supported »,
 docs Citrix v2601). D'où :
 
 - **Cosmic : Wayland-only → éliminatoire.**
-- **Pop Shell : extension GNOME**, la session « Ubuntu on Xorg » est posée
+- **tiling GNOME : extension GNOME**, la session « Ubuntu on Xorg » est posée
   par défaut (`WaylandEnable=false` dans GDM) → X11 natif garanti, sans les
   workarounds Wayland de fedoriri (xwayland-satellite, inhibiteurs de
   raccourcis, fedoriri-passthrough).
@@ -89,7 +89,7 @@ celle de l'ISO : `cryptsetup luksChangeKey /dev/<partition-luks>`.
 | Voie NoCloud/autoinstall : ISO desktop amont + seed injectée au menu de boot | subiquity est l'installateur ; l'autoinstall est LE mécanisme officiel d'installation non interactive Ubuntu |
 | Secrets dans des fichiers SÉPARÉS de `user-data` | subiquity recopie `user-data` dans `/var/log/installer/` : le hash et la phrase LUKS n'y finiraient sinon en clair |
 | Génération de `/autoinstall.yaml` à l'installation (early-commands) | le disque cible est détecté (le plus gros, média exclu) ; la phrase LUKS ne vit que dans un keyfile temporaire effacé |
-| **GNOME + Pop Shell, Xorg forcé** (`WaylandEnable=false`) | Citrix exige X11 ; Pop Shell garde un environnement GNOME familier avec le tiling |
+| **GNOME + tiling GNOME, Xorg forcé** (`WaylandEnable=false`) | Citrix exige X11 ; tiling GNOME garde un environnement GNOME familier avec le tiling |
 | Citrix ligne **stable .deb** | Ubuntu 22/24.04 est supportée officiellement ; le paquet embarque webkit2gtk-4.0 → pas de mismatch, pas de `--nodeps` |
 | Travail lourd au **premier boot**, pas dans late-commands | pas de réseau garanti en chroot, services non démarrables ; unité oneshot avec témoin, sortie console |
 | Pool local de `.deb` sur l'ISO (source apt `file://`) | installation sans réseau ; dépendances résolues par apt en chroot de build |

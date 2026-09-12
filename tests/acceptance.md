@@ -37,9 +37,9 @@ Non exécutés ici (pas de VM Ubuntu ni de matériel dans l'environnement de dev
 2. `loginctl show-session $(loginctl | grep ubun | awk '{print $1}') -p Type` → `Type=x11`.
 3. GDM : `grep WaylandEnable /etc/gdm3/custom.conf` → `WaylandEnable=false`.
 
-## 5. Pop Shell et bureau
+## 5. tiling GNOME et bureau
 
-1. Extensions : `gnome-extensions list-user` inclut `pop-shell@system76.com`.
+1. Extensions : `gnome-extensions list-user` inclut `ubuntu-tiling-assistant@ubuntu.com`.
 2. Tiling actif : Super+G bascule le mode tuilage ; les fenêtres se tuilent.
 3. Thème par défaut : `cat ~/.config/ubunturiri/current-theme` →
    `tokyo-night` ; alacritty aux couleurs du thème.
