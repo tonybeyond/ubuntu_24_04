@@ -309,30 +309,37 @@ ISOLINUX
   fi
 
   # --- Recombinaison hybride (BIOS + UEFI) ---------------------------------
-  # Les options El Torito amont sont RELUES du catalogue de l'ISO
-  # (-report_el_torito as_mkisofs) et rejouées telles quelles : jamais de
-  # chemin d'image de boot codé en dur (varie d'une point-release à l'autre).
-  # Le boot catalog (-c) est repositionné sur un chemin qui existera dans
-  # l'arborescence extraite.
+  # Recette EXACTE des outils Ubuntu (isohdimage) pour une ISO noble :
+  # on n'essaie PAS de deviner/parsing le catalogue El Torito de l'amont
+  # (approche du début, fragile : le '-V 'Ubuntu…'' était rejeté comme
+  # « Unrecognized option »). Ubuntu noble boote :
+  #   - BIOS : isolinux/isolinux.bin
+  #   - UEFI : boot/grub/efi.img (image El Torito), + --efi-boot en GPT hybride
+  #   - MBR hybride : /usr/lib/ISOLINUX/isohdpfx.bin (paquet isolinux)
   run rm -f "$OUT_ISO"
-  local report
-  report="$(xorriso -indev "$UPSTREAM_ISO" -report_el_torito as_mkisofs 2>/dev/null)" \
-    || die "lecture du catalogue El Torito de l'ISO amont impossible"
-  xorriso_opts=()
-  local line
-  while IFS= read -r line; do
-    case "$line" in
-      -c|--boot-catalog*) : ;; # boot catalog : repositionné ci-dessous
-      *) xorriso_opts+=("$line") ;;
-    esac
-  done <<< "$report"
-  mkdir -p "$extract/boot/grub"
+  local efi_img=""
+  for cand in "$extract/boot/grub/efi.img" "$extract/EFI/boot/efi.img" "$extract/efi.img"; do
+    [ -f "$cand" ] && { efi_img="${cand#$extract/}"; break; }
+  done
+  [ -n "$efi_img" ] || die "image efi.img introuvable dans l'arborescence extraite (boot/grub/efi.img attendu)"
+
+  local isohdpfx="/usr/lib/ISOLINUX/isohdpfx.bin"
+  [ -f "$isohdpfx" ] || isohdpfx="/usr/lib/syslinux/isohdpfx.bin"
+  [ -f "$isohdpfx" ] || die "isohdpfx.bin introuvable (installez le paquet isolinux)"
+
   xorriso -as mkisofs \
+    -r -V "UBUNTURIRI" \
+    -o "$OUT_ISO" \
     -iso-level 3 -full-iso9660-filenames \
-    -volid "UBUNTURIRI" \
-    "${xorriso_opts[@]}" \
-    -c boot/boot.cat \
-    -output "$OUT_ISO" \
+    -J -l \
+    -isohybrid-mbr "$isohdpfx" \
+    -b isolinux/isolinux.bin \
+    -c isolinux/boot.cat \
+    -no-emul-boot -boot-load-size 4 -boot-info-table \
+    -eltorito-alt-boot \
+      -e "$efi_img" \
+      -no-emul-boot \
+      -isohybrid-gpt-basdat \
     "$extract" \
     || die "xorriso as mkisofs a échoué"
 
